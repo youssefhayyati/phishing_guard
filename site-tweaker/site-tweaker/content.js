@@ -114,6 +114,43 @@
   async function setAll(data) {
     cache = data;
     await chrome.storage.local.set({ [STORE]: data });
+    // Mirror the full store to the page's localStorage so an external tool
+    // (PhishGuard) can read the current tweaks over CDP without extension APIs.
+    try { window.localStorage.setItem("__siteTweakerExport", JSON.stringify(data)); } catch {}
+  }
+
+  // Tiny stable hash so we can tell when the shipped seed file changes.
+  function seedSig(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return s.length + ":" + h; }
+
+  // Automatic seed import. A deployed PhishGuard campaign ships a `seed.json`
+  // (the modifications uploaded when the campaign was created) next to the
+  // extension. On page load we apply it automatically — no clicks. The file is
+  // authoritative: a newly uploaded file (different contents) re-applies on the
+  // next load, but between reloads of the SAME file, live edits are preserved.
+  const SEED_SIG_KEY = "__siteTweakerSeedSig";
+  async function importSeed() {
+    let url;
+    try { url = chrome.runtime.getURL("seed.json"); } catch { return; }
+    let text, seed;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return;
+      text = await r.text();
+      seed = JSON.parse(text);
+    } catch { return; }
+    if (!isObj(seed) || !isObj(seed.pages)) return;
+    const pages = Object.entries(seed.pages).filter(([, v]) => Array.isArray(v) && v.length);
+    if (!pages.length) return;
+
+    const sig = seedSig(text);
+    let applied;
+    try { applied = (await chrome.storage.local.get(SEED_SIG_KEY))[SEED_SIG_KEY]; } catch {}
+    if (applied === sig) return; // this exact file already applied — keep live edits
+
+    const data = await getAll();
+    for (const [page, items] of pages) data.pages[page] = items.filter(isObj); // authoritative
+    await setAll(data);
+    try { await chrome.storage.local.set({ [SEED_SIG_KEY]: sig }); } catch {}
   }
   const pageItems = data => (Array.isArray(data.pages[pageKey()]) ? data.pages[pageKey()].filter(isObj) : []);
   function writePage(data, list) {
@@ -667,8 +704,22 @@ input[type=checkbox]{width:auto;vertical-align:middle}
   // Single-page apps change the URL without reloading.
   window.addEventListener("popstate", scheduleApply);
 
+  // PhishGuard control hooks. The control plane dispatches these page-level
+  // events over CDP (main world); we handle them here (isolated world) where
+  // chrome.storage is available.
+  //   __st_clear  → wipe all saved tweaks so the preview starts empty.
+  window.addEventListener("__st_clear", () => {
+    try {
+      chrome.storage.local.clear().then(() => {
+        try { window.localStorage.removeItem("__siteTweakerExport"); } catch {}
+        location.reload();
+      });
+    } catch {}
+  });
+
   window.__SITE_TWEAKER_PRO__ = { isAlive: alive, teardown };
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  getAll().then(applySaved).catch(() => {});
+  // Seed first (deployed campaigns), then load + apply whatever is stored.
+  importSeed().then(getAll).then(applySaved).catch(() => {});
 })();

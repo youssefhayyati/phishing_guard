@@ -20,16 +20,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/overview', [DashboardController::class, 'overview']);
     Route::get('/campaigns', [CampaignController::class, 'index']);
     Route::post('/campaigns', [CampaignController::class, 'store']);
+    Route::post('/campaigns/bulk-delete', [CampaignController::class, 'bulkDestroy']);
     Route::get('/campaigns/{id}', [CampaignController::class, 'show']);
+    Route::delete('/campaigns/{id}', [CampaignController::class, 'destroy']);
     Route::patch('/campaigns/{id}/status', [CampaignController::class, 'updateStatus']);
     Route::post('/campaigns/{id}/deploy', [CampaignController::class, 'deploy']);
     Route::get('/campaigns/{id}/deployment', [CampaignController::class, 'deployment']);
+    Route::put('/campaigns/{id}/tweaks', [CampaignController::class, 'saveTweaks']);
 
     Route::get('/campaigns/{campaignId}/sessions', [CampaignSessionController::class, 'index']);
     Route::delete('/campaigns/{campaignId}/sessions/{sessionId}', [CampaignSessionController::class, 'destroy']);
 
     Route::get('/novnc/status', [NoVncController::class, 'status']);
     Route::post('/novnc/launch', [NoVncController::class, 'launch']);
+    Route::get('/novnc/tweaks', [NoVncController::class, 'captureTweaks']);
+    Route::post('/novnc/reset', [NoVncController::class, 'resetTweaks']);
 
     // Remote servers (IP + SSH credentials) — CRUD
     Route::get('/servers', [ServerController::class, 'index']);

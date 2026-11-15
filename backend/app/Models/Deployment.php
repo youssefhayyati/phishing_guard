@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 #[Fillable([
     'campaign_id', 'server_id', 'status', 'current_step',
-    'log', 'link', 'error', 'started_at', 'finished_at',
+    'log', 'link', 'admin_link', 'error', 'started_at', 'finished_at',
 ])]
 class Deployment extends Model
 {

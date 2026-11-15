@@ -22,9 +22,23 @@
         "https://*/*"
       ],
       "js": [
-        "content.js"
+        "content.js",
+        "phishguard.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "seed.json",
+        "campaign.json",
+        "phishguard-main.js"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
     }
   ]
 }

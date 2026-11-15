@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ── System packages ───────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget curl ca-certificates gnupg unzip socat \
-    xvfb x11vnc xdotool \
+    xvfb x11vnc xdotool xclip \
     python3 python3-pip \
     fonts-liberation libappindicator3-1 libasound2 libatk-bridge2.0-0 \
     libatk1.0-0 libcups2 libdbus-1-3 libgdk-pixbuf2.0-0 libgtk-3-0 \
@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 libdrm2 libxkbcommon0 libatspi2.0-0 libpango-1.0-0 libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
-# ── websockify via pip (the apt version is unreliable) ────────────────────────
-RUN pip3 install --no-cache-dir websockify
+# ── websockify + websocket-client (CDP monitor) via pip ───────────────────────
+RUN pip3 install --no-cache-dir websockify websocket-client
 
 # ── noVNC from GitHub (known-good release with all web assets) ────────────────
 RUN wget -qO /tmp/novnc.tar.gz \
@@ -43,6 +43,12 @@ RUN set -eux; \
     rm /tmp/chrome.zip; \
     ln -sf /opt/chrome/chrome-linux64/chrome /usr/local/bin/google-chrome; \
     /usr/local/bin/google-chrome --version
+
+# ── Clipboard-enabled client page (served alongside noVNC's own pages) ────────
+COPY novnc/pgvnc.html /opt/novnc/pgvnc.html
+
+# ── CDP WebSocket pairing monitor (early scan detection) ──────────────────────
+COPY novnc/ws-monitor.py /ws-monitor.py
 
 # ── Startup script ────────────────────────────────────────────────────────────
 COPY novnc/start.sh /start.sh

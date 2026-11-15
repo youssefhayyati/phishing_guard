@@ -10,8 +10,9 @@ use Illuminate\Database\Eloquent\Model;
  * for security-awareness training. Stores only aggregate counts.
  */
 #[Fillable([
-    'user_id', 'server_id', 'name', 'description', 'template', 'status',
-    'target_url', 'server_host', 'server_domain', 'deploy_repo_url', 'deploy_branch',
+    'user_id', 'server_id', 'uuid', 'agent_id', 'agent_version', 'agent_last_seen_at',
+    'name', 'description', 'template', 'status',
+    'target_url', 'server_host', 'server_domain', 'deploy_repo_url', 'deploy_branch', 'site_tweaks',
     'proxy_enabled', 'proxy_on_the_fly',
     'redirect_type', 'redirect_target', 'trigger_action', 'kill_session_url',
     'sent', 'opened', 'clicked', 'reported', 'start_date',
@@ -21,14 +22,25 @@ class Campaign extends Model
     protected function casts(): array
     {
         return [
-            'start_date'       => 'date',
-            'proxy_enabled'    => 'boolean',
-            'proxy_on_the_fly' => 'boolean',
-            'sent'             => 'integer',
-            'opened'           => 'integer',
-            'clicked'          => 'integer',
-            'reported'         => 'integer',
+            'start_date'         => 'date',
+            'proxy_enabled'      => 'boolean',
+            'proxy_on_the_fly'   => 'boolean',
+            'sent'               => 'integer',
+            'opened'             => 'integer',
+            'clicked'            => 'integer',
+            'reported'           => 'integer',
+            'agent_last_seen_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Give every campaign a stable UUID + agent identity for RabbitMQ
+        // message routing/isolation (STRATEGY.md section 5.2).
+        static::creating(function (Campaign $c) {
+            $c->uuid ??= (string) \Illuminate\Support\Str::uuid();
+            $c->agent_id ??= (string) \Illuminate\Support\Str::uuid();
+        });
     }
 
     public function user()
@@ -49,6 +61,11 @@ class Campaign extends Model
     public function deployments()
     {
         return $this->hasMany(Deployment::class);
+    }
+
+    public function events()
+    {
+        return $this->hasMany(CampaignEvent::class);
     }
 
     public function latestDeployment()

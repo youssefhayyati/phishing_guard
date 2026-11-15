@@ -4,7 +4,7 @@ FROM php:8.3-cli
 # System libs + PHP extensions Laravel needs
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip libzip-dev libonig-dev libsqlite3-dev \
-    && docker-php-ext-install pdo pdo_sqlite mbstring zip bcmath \
+    && docker-php-ext-install pdo pdo_sqlite mbstring zip bcmath sockets \
     && rm -rf /var/lib/apt/lists/*
 
 # Composer

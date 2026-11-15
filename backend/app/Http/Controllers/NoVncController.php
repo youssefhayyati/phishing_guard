@@ -2,11 +2,52 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Cdp;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 
 class NoVncController extends Controller
 {
+    /**
+     * Read the Site Tweaker modifications currently present in the preview
+     * browser (mirrored to the page's localStorage by the extension) via CDP.
+     * Returns the JSON string, or null if there are none.
+     */
+    public function captureTweaks(Cdp $cdp)
+    {
+        try {
+            $val = $cdp->evaluate("localStorage.getItem('__siteTweakerExport')");
+        } catch (\Throwable $e) {
+            return response()->json(['data' => ['site_tweaks' => null, 'error' => $e->getMessage()]]);
+        }
+
+        $tweaks = null;
+        if (is_string($val) && $val !== '') {
+            $o = json_decode($val, true);
+            // Only accept a real Site Tweaker store that actually has edits.
+            if (is_array($o) && isset($o['pages']) && is_array($o['pages']) && count($o['pages']) > 0) {
+                $tweaks = $val;
+            }
+        }
+
+        return response()->json(['data' => ['site_tweaks' => $tweaks]]);
+    }
+
+    /**
+     * Clear the preview browser's Site Tweaker storage so a new campaign starts
+     * from an unmodified site (dispatches the extension's clear hook via CDP).
+     */
+    public function resetTweaks(Cdp $cdp)
+    {
+        try {
+            $cdp->evaluate("window.dispatchEvent(new Event('__st_clear')); 'ok'");
+        } catch (\Throwable $e) {
+            return response()->json(['data' => ['reset' => false, 'error' => $e->getMessage()]]);
+        }
+
+        return response()->json(['data' => ['reset' => true]]);
+    }
+
     public function launch(Request $request)
     {
         $data = $request->validate([
@@ -26,7 +67,7 @@ class NoVncController extends Controller
         // NOT `resize`. Passing `scale=true` makes noVNC fit the framebuffer to
         // the iframe viewport; without it the canvas renders at native 1920×1080
         // and the page shows its own scrollbars.
-        $novncUrl = "{$novncBase}/vnc_lite.html?autoconnect=true&scale=true";
+        $novncUrl = "{$novncBase}/pgvnc.html?autoconnect=true&scale=true";
 
         // Navigate Chrome to target_url via CDP (best-effort).
         // Chrome's DevTools Protocol rejects requests whose Host header isn't
@@ -86,7 +127,7 @@ class NoVncController extends Controller
 
         return response()->json([
             'reachable' => $reachable,
-            'url'       => "{$novncBase}/vnc_lite.html?autoconnect=true&scale=true",
+            'url'       => "{$novncBase}/pgvnc.html?autoconnect=true&scale=true",
         ]);
     }
 }

@@ -1,40 +1,101 @@
 """PhishGuard agent entrypoint.
 
-Starts the agent and supervises its long-running tasks (STRATEGY.md section
-6.2): the RabbitMQ command consumer and the heartbeat publisher. Browser,
-analysis, and evidence work is driven by incoming commands.
+Establishes the RabbitMQ communication protocol first (STRATEGY.md section 18),
+then supervises the long-running tasks (section 6.2):
 
-This is the scaffold wiring for the first implementation milestone (section
-18): the communication protocol is established before browser automation, so
-the agent can be tested independently.
+  * command consumer   — campaign.activate / stop / delete
+  * heartbeat publisher — agent.heartbeat every N seconds
+  * session monitor     — coarse session.notification events from the browser
+
+Browser/analysis/evidence automation is driven by incoming commands and hangs
+off these channels; this module owns only the wiring and supervision.
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.logging import configure_logging, get_logger
+from app.messaging.connection import RabbitMQConnection
+from app.messaging.consumer import CommandConsumer
+from app.messaging.publisher import EventPublisher
+from app.messaging.queues import Topology
+from app.monitoring.heartbeat import HeartbeatPublisher
+from app.monitoring.session_events import SessionEventMonitor
+from app.schemas.events import (
+    ActivationResultPayload,
+    DeleteResultPayload,
+    EventType,
+    StopResultPayload,
+)
+
+
+def _build_command_handler(publisher: EventPublisher, settings: Settings, log):
+    """Return an async handler that answers lifecycle commands with results."""
+
+    async def handle(envelope: dict) -> None:
+        event_type = envelope.get("event_type")
+        correlation_id = envelope.get("message_id")
+        log.info("command.received", event_type=event_type)
+
+        if event_type == "campaign.activate":
+            await publisher.publish(
+                EventType.ACTIVATED.value,
+                ActivationResultPayload(agent_version=settings.agent_version),
+                correlation_id=correlation_id,
+            )
+        elif event_type == "campaign.stop":
+            await publisher.publish(
+                EventType.STOPPED.value,
+                StopResultPayload(),
+                correlation_id=correlation_id,
+            )
+        elif event_type == "campaign.delete":
+            await publisher.publish(
+                EventType.DELETED.value,
+                DeleteResultPayload(),
+                correlation_id=correlation_id,
+            )
+        else:
+            log.warning("command.unknown", event_type=event_type)
+
+    return handle
 
 
 async def run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, settings.log_json)
     log = get_logger("agent")
-    log.info("agent.starting", agent_id=str(settings.agent_id), version=settings.agent_version)
+    log.info(
+        "agent.starting",
+        agent_id=str(settings.agent_id),
+        campaign_id=str(settings.campaign_id),
+        version=settings.agent_version,
+    )
 
-    # TODO (phase 2): wire concrete implementations.
-    #   connection = await RabbitMQConnection.connect(settings)
-    #   consumer    = CommandConsumer(connection, campaign_manager)
-    #   heartbeat   = HeartbeatPublisher(connection, settings)
-    #   await asyncio.gather(consumer.run(), heartbeat.run())
-    tasks: list[asyncio.Task] = []
+    connection = await RabbitMQConnection.connect(settings)
+    topology = await Topology.declare(connection.channel, settings)
+    publisher = EventPublisher(topology, settings)
+
+    # Announce readiness immediately so the control plane sees the agent online
+    # even before it receives an explicit activate command.
+    await publisher.publish(
+        EventType.ACTIVATED.value,
+        ActivationResultPayload(agent_version=settings.agent_version),
+    )
+
+    consumer = CommandConsumer(topology, settings, _build_command_handler(publisher, settings, log))
+    heartbeat = HeartbeatPublisher(publisher, settings)
+    sessions = SessionEventMonitor(publisher, settings)
+
+    tasks = [
+        asyncio.create_task(consumer.run()),
+        asyncio.create_task(heartbeat.run()),
+        asyncio.create_task(sessions.run()),
+    ]
     try:
-        if not tasks:
-            log.warning("agent.idle", reason="no tasks wired yet — scaffold only")
-            await asyncio.Event().wait()  # park until cancelled
-        else:
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
     except asyncio.CancelledError:  # pragma: no cover
         pass
     finally:
@@ -42,6 +103,7 @@ async def run() -> None:
             t.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await t
+        await connection.close()
         log.info("agent.stopped")
 
 

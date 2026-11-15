@@ -31,6 +31,7 @@ const form = ref({
   server_id: null as number | null,
   server_host: '',
   server_domain: '',
+  site_tweaks: '',
   proxy_enabled: false,
   proxy_on_the_fly: false,
   redirect_type: 'url' as 'url' | 'html',
@@ -71,6 +72,7 @@ watch(() => form.value.server_id, (id) => {
   form.value.server_host = s ? s.ip_address : ''
 })
 
+
 // ─── Validation per step ──────────────────────────────────────────────────────
 
 const canProceed = computed(() => {
@@ -109,10 +111,24 @@ async function launchVnc() {
     })
     vncUrl.value   = res.data.url
     vncState.value = 'ready'
+    // Start every new campaign's editor from a clean slate — clear any tweaks
+    // recalled from a previous session so the preview shows the unmodified site.
+    setTimeout(() => {
+      useApiFetch('/api/novnc/reset', { method: 'POST' }).catch(() => {})
+    }, 1800)
   } catch (e: any) {
     vncError.value  = e?.data?.message ?? 'Could not reach the noVNC container. Is it running?'
     vncState.value = 'error'
   }
+}
+
+// Read the modifications the operator made in the preview browser (Site Tweaker)
+// so they travel with the campaign and auto-apply on the deployed server.
+async function captureTweaksFromPreview() {
+  try {
+    const res = await useApiFetch<{ data: { site_tweaks: string | null } }>('/api/novnc/tweaks')
+    if (res.data.data.site_tweaks) form.value.site_tweaks = res.data.data.site_tweaks
+  } catch { /* keep whatever was uploaded manually */ }
 }
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
@@ -131,6 +147,8 @@ async function submit() {
   submitting.value = true
   submitError.value = ''
   try {
+    // Auto-capture the modifications made in the preview browser before saving.
+    if (vncState.value === 'ready') await captureTweaksFromPreview()
     const res = await useApiFetch<{ data: CampaignPayload }>('/api/campaigns', {
       method: 'POST',
       body: {
@@ -140,6 +158,7 @@ async function submit() {
         server_id:        form.value.server_id,
         server_host:      form.value.server_host,
         server_domain:    form.value.server_domain || null,
+        site_tweaks:      form.value.site_tweaks || null,
         proxy_enabled:    form.value.proxy_enabled,
         proxy_on_the_fly: form.value.proxy_on_the_fly,
         redirect_type:    form.value.redirect_type,

@@ -5,6 +5,24 @@
 #   docker compose up --build
 
 services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: phishguard-rabbitmq
+    environment:
+      # A non-'guest' user that can authenticate from remote agents (the built-in
+      # 'guest' is restricted to localhost). Change RABBITMQ_PASS for production.
+      RABBITMQ_DEFAULT_USER: "phishguard"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASS:-phishguard_dev}"
+    ports:
+      - "5672:5672"     # AMQP — expose via a tunnel for remote campaign agents
+      - "15672:15672"   # Management UI → http://localhost:15672 (phishguard / phishguard_dev)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   novnc:
     build:
       context: .
@@ -29,6 +47,9 @@ services:
     environment:
       APP_ENV: local
       APP_DEBUG: "true"
+      # Pinned so encrypted data (server passwords) survives container
+      # recreation. Overridable via a host .env; never regenerated at boot.
+      APP_KEY: "${APP_KEY:-base64:mv7fWURuffLx5YJAzeUmmGU+WqExkttJGGHRyiAr2hA=}"
       DB_CONNECTION: sqlite
       DB_DATABASE: /app/database/database.sqlite
       QUEUE_CONNECTION: database
@@ -39,6 +60,14 @@ services:
       DEPLOY_REPO_URL: "${DEPLOY_REPO_URL:-}"
       DEPLOY_BRANCH: "${DEPLOY_BRANCH:-master}"
       DEPLOY_NOVNC_PORT: "6080"
+      # RabbitMQ the control plane publishes commands to / consumes events from.
+      PHISHGUARD_AMQP_URL: "amqp://phishguard:${RABBITMQ_PASS:-phishguard_dev}@rabbitmq:5672/"
+      # Public AMQP URL injected into remote campaign servers so their agents
+      # can phone home. Set this to your tunnel (e.g. amqps://host:5671/).
+      DEPLOY_AMQP_PUBLIC_URL: "${DEPLOY_AMQP_PUBLIC_URL:-}"
+    depends_on:
+      rabbitmq:
+        condition: service_started
     volumes:
       # Persist the SQLite database across container restarts
       - backend-db:/app/database

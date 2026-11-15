@@ -1,0 +1,9 @@
+# Lean runtime deps for the deployed agent (messaging + CDP polling only).
+# The full requirements.txt (playwright, docker, tests) is for development and
+# future browser-automation work.
+aio-pika
+httpx
+pydantic
+pydantic-settings
+structlog
+python-json-logger
