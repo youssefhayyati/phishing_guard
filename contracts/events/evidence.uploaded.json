@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/events/evidence.uploaded.json",
+  "title": "evidence.uploaded payload",
+  "description": "Python -> Laravel. Evidence metadata (STRATEGY.md section 4.2 / 5.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evidence_type", "storage_key", "sha256", "mime_type", "file_size"],
+  "properties": {
+    "evidence_type": { "type": "string" },
+    "storage_key": { "type": "string" },
+    "sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "mime_type": { "type": "string" },
+    "file_size": { "type": "integer", "minimum": 0 },
+    "scan_status": { "type": "string" }
+  }
+}

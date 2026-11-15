@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/envelope.schema.json",
+  "title": "PhishGuard message envelope",
+  "description": "Standard envelope wrapping every command and event (STRATEGY.md section 5.2).",
+  "type": "object",
+  "required": ["message_id", "campaign_id", "event_type", "schema_version", "timestamp", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "message_id": { "type": "string", "format": "uuid", "description": "Unique ID for deduplication." },
+    "correlation_id": { "type": "string", "format": "uuid", "description": "Links a command to its result." },
+    "campaign_id": { "type": "string", "format": "uuid", "description": "Campaign isolation." },
+    "agent_id": { "type": "string", "format": "uuid", "description": "Originating agent identity." },
+    "event_type": { "type": "string", "description": "Event or command name (routing key)." },
+    "schema_version": { "type": "integer", "minimum": 1, "description": "Contract version." },
+    "timestamp": { "type": "string", "format": "date-time", "description": "UTC timestamp." },
+    "payload": { "type": "object", "description": "Validated event-specific data." }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/events/campaign.deleted.json",
+  "title": "campaign.deleted payload",
+  "description": "Python -> Laravel. Deletion result (STRATEGY.md section 5.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string" },
+    "containers_removed": { "type": "boolean" },
+    "temporary_files_removed": { "type": "boolean" },
+    "evidence_preserved": { "type": "boolean" }
+  }
+}

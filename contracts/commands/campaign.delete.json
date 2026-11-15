@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/commands/campaign.delete.json",
+  "title": "campaign.delete payload",
+  "description": "Laravel -> Python. Routing key campaign.delete. Deletion must not destroy evidence subject to retention or investigation holds (STRATEGY.md section 5.3).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "remove_containers": { "type": "boolean" },
+    "remove_temporary_files": { "type": "boolean" },
+    "preserve_evidence": { "type": "boolean" }
+  }
+}

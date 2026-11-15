@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/commands/campaign.activate.json",
+  "title": "campaign.activate payload",
+  "description": "Laravel -> Python. Routing key campaign.activate (STRATEGY.md section 5.3).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mode": { "type": "string", "enum": ["simulation", "investigation"] },
+    "browser": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engine": { "type": "string", "enum": ["chromium"] },
+        "novnc_enabled": { "type": "boolean" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu_limit": { "type": "integer", "minimum": 1 },
+        "memory_limit": { "type": "string" }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url_analysis": { "type": "boolean" },
+        "download_scanning": { "type": "boolean" },
+        "event_monitoring": { "type": "boolean" }
+      }
+    }
+  }
+}

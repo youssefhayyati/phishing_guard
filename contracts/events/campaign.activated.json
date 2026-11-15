@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/events/campaign.activated.json",
+  "title": "campaign.activated payload",
+  "description": "Python -> Laravel. Activation result (STRATEGY.md section 5.3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "agent_version"],
+  "properties": {
+    "status": { "type": "string" },
+    "browser_status": { "type": "string" },
+    "novnc_status": { "type": "string" },
+    "agent_version": { "type": "string" }
+  }
+}

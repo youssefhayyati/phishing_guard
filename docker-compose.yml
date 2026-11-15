@@ -1,0 +1,67 @@
+# PhishGuard — full stack via Docker
+#   frontend (Nuxt SPA)  -> http://localhost:3000
+#   backend  (Laravel)   -> http://localhost:8000
+#
+#   docker compose up --build
+
+services:
+  novnc:
+    build:
+      context: .
+      dockerfile: novnc/Dockerfile
+    container_name: phishguard-novnc
+    ports:
+      - "6080:6080"   # noVNC web UI  → http://localhost:6080
+      - "9222:9222"   # Chrome DevTools Protocol (CDP)
+    volumes:
+      # Mount the Site Tweaker extension read-only inside Chrome
+      - ./site-tweaker/site-tweaker:/extensions/site-tweaker:ro
+    shm_size: 2gb     # Chrome needs shared memory
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: phishguard-backend
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /app/database/database.sqlite
+      QUEUE_CONNECTION: database
+      # Keep above DeployCampaign::$timeout so a long deploy isn't re-queued.
+      DB_QUEUE_RETRY_AFTER: "3700"
+      # Default Git repo/branch the campaign servers clone (per-campaign override
+      # in the UI wins). Set DEPLOY_REPO_URL to your pushed repo.
+      DEPLOY_REPO_URL: "${DEPLOY_REPO_URL:-}"
+      DEPLOY_BRANCH: "${DEPLOY_BRANCH:-master}"
+      DEPLOY_NOVNC_PORT: "6080"
+    volumes:
+      # Persist the SQLite database across container restarts
+      - backend-db:/app/database
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1',8000)?0:1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NUXT_PUBLIC_API_BASE: http://localhost:8000
+    container_name: phishguard-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # Browser reaches the API on the host-published port
+      NUXT_PUBLIC_API_BASE: http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  backend-db:

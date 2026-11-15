@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/events/campaign.stopped.json",
+  "title": "campaign.stopped payload",
+  "description": "Python -> Laravel. Stop result (STRATEGY.md section 5.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string" },
+    "evidence_preserved": { "type": "boolean" }
+  }
+}

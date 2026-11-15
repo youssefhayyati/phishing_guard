@@ -1,0 +1,21 @@
+# Dependencies / build artifacts — rebuilt inside the image
+**/node_modules
+**/vendor
+frontend/.nuxt
+frontend/.output
+frontend/dist
+backend/storage/framework/cache/data/*
+backend/storage/logs/*
+
+# Local env & secrets (entrypoint recreates backend/.env from .env.example)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local SQLite data — created fresh in the container
+backend/database/database.sqlite
+
+# VCS / editor / OS
+.git
+**/.DS_Store
+**/*.log

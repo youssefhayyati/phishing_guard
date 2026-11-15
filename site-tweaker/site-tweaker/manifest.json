@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Site Tweaker — Visual Editor",
+  "version": "1.2.0",
+  "description": "Visually customize websites locally, save changes, and export or import them as JSON.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Site Tweaker",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

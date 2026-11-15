@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/events/session.notification.json",
+  "title": "session.notification payload",
+  "description": "Python -> Laravel. Coarse interaction metadata only. Do not capture typed characters or passwords (STRATEGY.md section 5.4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "action", "timestamp"],
+  "properties": {
+    "session_id": { "type": "string", "format": "uuid" },
+    "action": {
+      "type": "string",
+      "enum": ["user_joined", "user_left", "page_navigation", "click_activity", "form_interaction_detected", "download_started", "download_completed", "download_blocked", "session_idle", "session_error"]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "metadata": { "type": "object" }
+  }
+}

@@ -1,0 +1,26 @@
+# Per-campaign composition run on the remote server by DeployCampaign.
+#
+# Brings up the noVNC + Chrome session (with the Site Tweaker extension) and
+# navigates Chrome straight to the campaign's target URL, so the deployed,
+# "modified site" is viewable at  http://<server-ip>:<NOVNC_PORT>/vnc_lite.html
+#
+# Invoked as (from the repo root):
+#   START_URL=<target> NOVNC_PORT=6080 \
+#     docker compose -f deploy/campaign-compose.yml -p phishguard_c<id> up -d --build
+#
+# Build context is the repo root (one level up from this file) so it reuses the
+# exact same novnc/Dockerfile the local stack builds.
+services:
+  novnc:
+    build:
+      context: ..
+      dockerfile: novnc/Dockerfile
+    environment:
+      # Chrome opens this on launch (see novnc/start.sh).
+      START_URL: ${START_URL:-about:blank}
+    ports:
+      - "${NOVNC_PORT:-6080}:6080"   # noVNC web UI
+    volumes:
+      - ../site-tweaker/site-tweaker:/extensions/site-tweaker:ro
+    shm_size: 2gb
+    restart: unless-stopped

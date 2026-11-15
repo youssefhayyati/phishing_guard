@@ -1,0 +1,11 @@
+aio-pika
+pydantic
+pydantic-settings
+docker
+playwright
+httpx
+structlog
+tenacity
+python-json-logger
+pytest
+pytest-asyncio

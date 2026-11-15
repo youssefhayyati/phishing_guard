@@ -1,0 +1,22 @@
+# Local/dev composition for the campaign server (STRATEGY.md section 7.1).
+# In production the agent is deployed per-campaign via SSH + versioned releases
+# (section 9) and connects outbound to the central RabbitMQ over AMQPS.
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    env_file: ../.env
+    restart: unless-stopped
+    # Avoid mounting the raw host Docker socket (section 6.3): prefer a narrowly
+    # scoped privileged supervisor or restricted container-management API.
+    networks: [campaign]
+
+  # Browser + noVNC share an image (section 7.1). Placeholder service.
+  # browser:
+  #   image: phishguard/browser:1.0.0
+  #   networks: [campaign]
+
+networks:
+  campaign:
+    driver: bridge

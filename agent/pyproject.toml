@@ -1,0 +1,31 @@
+[project]
+name = "phishguard-agent"
+version = "1.0.0"
+description = "PhishGuard standalone remote agent — campaign lifecycle, messaging, browser, analysis, evidence."
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "aio-pika",
+    "pydantic",
+    "pydantic-settings",
+    "docker",
+    "playwright",
+    "httpx",
+    "structlog",
+    "tenacity",
+    "python-json-logger",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+phishguard-agent = "app.main:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

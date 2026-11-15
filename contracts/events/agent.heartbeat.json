@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phishguard/contracts/events/agent.heartbeat.json",
+  "title": "agent.heartbeat payload",
+  "description": "Python -> Laravel. Agent health every 30s (STRATEGY.md section 13).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent_version"],
+  "properties": {
+    "agent_version": { "type": "string" },
+    "status": { "type": "string" },
+    "uptime_seconds": { "type": "number", "minimum": 0 }
+  }
+}
